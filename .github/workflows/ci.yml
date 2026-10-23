@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Syntax check
+        run: |
+          for file in src/*.js; do
+            node --check "$file"
+          done
+
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color .github/workflows/*.yml examples/*.yml
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Run tests
+        run: npm test
+
+  integration:
+    name: Integration (compares two fixture APKs)
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build fixture APKs
+        run: |
+          work=$(mktemp -d)
+          for variant in base head; do
+            mkdir -p "$work/$variant/lib/arm64-v8a" "$work/$variant/res/layout" "$work/$variant/assets"
+            printf '<manifest package="com.example.app"/>' > "$work/$variant/AndroidManifest.xml"
+            head -c 2048 /dev/urandom > "$work/$variant/resources.arsc"
+            head -c 4096 /dev/urandom > "$work/$variant/lib/arm64-v8a/libapp.so"
+            printf '<LinearLayout/>' > "$work/$variant/res/layout/main.xml"
+            printf '{"feature":true}' > "$work/$variant/assets/config.json"
+          done
+          head -c 20000 /dev/urandom > "$work/base/classes.dex"
+          head -c 60000 /dev/urandom > "$work/head/classes.dex"
+          head -c 10000 /dev/urandom > "$work/head/classes2.dex"
+          mkdir -p fixtures
+          (cd "$work/base" && zip -qr "$GITHUB_WORKSPACE/fixtures/base.apk" .)
+          (cd "$work/head" && zip -qr "$GITHUB_WORKSPACE/fixtures/head.apk" .)
+          ls -l fixtures
+
+      - name: Run action
+        id: report
+        uses: ./
+        with:
+          head-path: fixtures/head.apk
+          base-path: fixtures/base.apk
+          name: fixture
+          comment: false
+          max-increase-bytes: 1000000
+          top-files: 5
+
+      - name: Verify comparison outputs
+        env:
+          HEAD_SIZE: ${{ steps.report.outputs.head-size }}
+          BASE_SIZE: ${{ steps.report.outputs.base-size }}
+          DIFF_BYTES: ${{ steps.report.outputs.diff-bytes }}
+          DIFF_PERCENT: ${{ steps.report.outputs.diff-percent }}
+          EXCEEDED: ${{ steps.report.outputs.exceeded }}
+          REPORT: ${{ steps.report.outputs.report }}
+        run: |
+          [[ $HEAD_SIZE == "$(stat -c %s fixtures/head.apk)" ]] || { echo "::error::unexpected head-size '$HEAD_SIZE'"; exit 1; }
+          [[ $BASE_SIZE == "$(stat -c %s fixtures/base.apk)" ]] || { echo "::error::unexpected base-size '$BASE_SIZE'"; exit 1; }
+          [[ $DIFF_BYTES == $((HEAD_SIZE - BASE_SIZE)) ]] || { echo "::error::unexpected diff-bytes '$DIFF_BYTES'"; exit 1; }
+          (( DIFF_BYTES > 45000 )) || { echo "::error::diff-bytes '$DIFF_BYTES' is smaller than expected"; exit 1; }
+          [[ $DIFF_PERCENT =~ ^[0-9]+\.[0-9]{2}$ ]] || { echo "::error::unexpected diff-percent '$DIFF_PERCENT'"; exit 1; }
+          [[ $EXCEEDED == false ]] || { echo "::error::unexpected exceeded '$EXCEEDED'"; exit 1; }
+          grep -q 'classes2\.dex. | added |' <<< "$REPORT" || { echo "$REPORT"; echo "::error::report does not list classes2.dex as added"; exit 1; }
+          grep -q '^| dex |' <<< "$REPORT" || { echo "$REPORT"; echo "::error::report has no dex category"; exit 1; }
+
+      - name: Run action with a limit that is exceeded
+        id: limited
+        continue-on-error: true
+        uses: ./
+        with:
+          head-path: fixtures/head.apk
+          base-path: fixtures/base.apk
+          comment: false
+          max-increase-percent: 5
+
+      - name: Run action without a baseline
+        id: headonly
+        uses: ./
+        with:
+          head-path: fixtures/head.apk
+          base-path: fixtures/missing.apk
+          comment: false
+          max-increase-bytes: 0
+
+      - name: Verify limit and no-baseline outputs
+        env:
+          LIMITED_OUTCOME: ${{ steps.limited.outcome }}
+          LIMITED_EXCEEDED: ${{ steps.limited.outputs.exceeded }}
+          HEADONLY_BASE: ${{ steps.headonly.outputs.base-size }}
+          HEADONLY_DIFF: ${{ steps.headonly.outputs.diff-bytes }}
+          HEADONLY_EXCEEDED: ${{ steps.headonly.outputs.exceeded }}
+          HEADONLY_REPORT: ${{ steps.headonly.outputs.report }}
+        run: |
+          [[ $LIMITED_OUTCOME == failure ]] || { echo "::error::expected the limited run to fail, got '$LIMITED_OUTCOME'"; exit 1; }
+          [[ $LIMITED_EXCEEDED == true ]] || { echo "::error::expected exceeded=true, got '$LIMITED_EXCEEDED'"; exit 1; }
+          [[ -z $HEADONLY_BASE && -z $HEADONLY_DIFF ]] || { echo "::error::expected empty base-size and diff-bytes"; exit 1; }
+          [[ $HEADONLY_EXCEEDED == false ]] || { echo "::error::expected exceeded=false without baseline"; exit 1; }
+          grep -q 'No baseline artifact was found' <<< "$HEADONLY_REPORT" || { echo "::error::report does not mention the missing baseline"; exit 1; }

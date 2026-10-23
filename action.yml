@@ -1,0 +1,58 @@
+name: App Size Report
+description: Compare the size of an Android APK/AAB or iOS IPA against a baseline and report it on the pull request
+author: Abhishek Bansal
+
+branding:
+  icon: package
+  color: green
+
+inputs:
+  head-path:
+    description: Path to the artifact (APK, AAB or IPA) built from the pull request
+    required: true
+  base-path:
+    description: Path to the baseline artifact built from the base branch; when empty or missing only the head build is reported
+    required: false
+    default: ''
+  name:
+    description: Label shown in the report and used to keep one sticky comment per artifact; defaults to the head file name
+    required: false
+    default: ''
+  max-increase-bytes:
+    description: Fail the step when the artifact grows by more than this many bytes
+    required: false
+    default: ''
+  max-increase-percent:
+    description: Fail the step when the artifact grows by more than this percentage
+    required: false
+    default: ''
+  comment:
+    description: Create or update a sticky pull request comment with the report
+    required: false
+    default: 'true'
+  github-token:
+    description: Token used to write the pull request comment. Needs pull-requests write
+    required: false
+    default: ${{ github.token }}
+  top-files:
+    description: How many entries with the largest compressed size change to list
+    required: false
+    default: '10'
+
+outputs:
+  head-size:
+    description: Size of the head artifact file in bytes
+  base-size:
+    description: Size of the baseline artifact file in bytes, empty without a baseline
+  diff-bytes:
+    description: Head size minus base size in bytes, empty without a baseline
+  diff-percent:
+    description: Size change in percent with two decimals, empty without a baseline
+  report:
+    description: Markdown report
+  exceeded:
+    description: true when max-increase-bytes or max-increase-percent was exceeded, otherwise false
+
+runs:
+  using: node24
+  main: src/index.js
