@@ -135,7 +135,7 @@ and download the one from the latest successful run in the pull request:
 
 ```yaml
 # in the workflow that runs on push to main
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: apk-baseline
           path: app/build/outputs/apk/release/app-release-unsigned.apk
