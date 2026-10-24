@@ -65,7 +65,7 @@ jobs:
           done
 
       - name: Report IPA size
-        uses: abhishek-3289/app-size-report@v1
+        uses: appshipkit/app-size-report@v1
         with:
           head-path: ${{ runner.temp }}/head/export/App.ipa
           base-path: ${{ runner.temp }}/base/export/App.ipa

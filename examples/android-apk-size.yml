@@ -46,7 +46,7 @@ jobs:
 
       - name: Report APK size
         id: size
-        uses: abhishek-3289/app-size-report@v1
+        uses: appshipkit/app-size-report@v1
         with:
           head-path: head/app/build/outputs/apk/release/app-release-unsigned.apk
           base-path: base/app/build/outputs/apk/release/app-release-unsigned.apk
