@@ -14,7 +14,7 @@
     steps:
       - name: Report APK size
         id: size
-        uses: abhishek-3289/app-size-report@v1
+        uses: appshipkit/app-size-report@v1
         with:
           head-path: head/app/build/outputs/apk/release/app-release-unsigned.apk
           base-path: base/app/build/outputs/apk/release/app-release-unsigned.apk
@@ -150,7 +150,7 @@ and download the one from the latest successful run in the pull request:
             --status success --limit 1 --json databaseId --jq '.[0].databaseId')
           gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name apk-baseline --dir baseline
 
-      - uses: abhishek-3289/app-size-report@v1
+      - uses: appshipkit/app-size-report@v1
         with:
           head-path: app/build/outputs/apk/release/app-release-unsigned.apk
           base-path: baseline/app-release-unsigned.apk
